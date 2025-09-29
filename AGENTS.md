@@ -3,6 +3,10 @@
 ## Overview
 Crawlify exposes a small set of HTTP-driven agents that wrap external services and local tooling to crawl webpages and search the web. Incoming requests are validated in the Express layer (`src/routes`) and then delegated to agent functions in `src/lib`. Each agent returns plain JSON payloads and surfaces operational issues through the shared `HttpError` helper.
 
+## Environment Configuration
+- Create a `.env` file in the project root to provide secrets during local development or container startup. Keys defined here apply unless the process already supplies an environment variable with the same name.
+- The crawler summary feature reads `OPENROUTER_API_KEY`, and the search agent reads `FIRECRAWL_API_KEY` from `process.env`.
+
 ## HTTP Entry Points
 - `POST /api/v1/crawl` → `crawlUrl` in `src/lib/crawlService.js`
 - `POST /api/v1/search` → `searchWeb` in `src/lib/searchService.js`

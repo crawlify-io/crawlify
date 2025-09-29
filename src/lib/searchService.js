@@ -1,5 +1,8 @@
 const axios = require('axios');
+const { loadEnv } = require('../config/loadEnv');
 const HttpError = require('../utils/httpError');
+
+loadEnv();
 
 async function searchWeb({ query, limit }) {
   const apiKey = process.env.FIRECRAWL_API_KEY ?? '';

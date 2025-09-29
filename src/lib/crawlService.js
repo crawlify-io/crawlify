@@ -4,7 +4,10 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { v4: uuidv4 } = require('uuid');
+const { loadEnv } = require('../config/loadEnv');
 const HttpError = require('../utils/httpError');
+
+loadEnv();
 
 const USER_AGENT = 'CrawlifyBot/1.0';
 const SUPPORTED_FORMATS = new Set(['html', 'markdown', 'summary', 'links']);

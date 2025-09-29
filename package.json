@@ -4,6 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+    "dev": "node scripts/dev.js",
     "start": "node src/server.js",
     "test": "node --test"
   },
