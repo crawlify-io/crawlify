@@ -1,63 +1,65 @@
 # Crawlify API
 
-Crawlify 提供一组基于 Express 的 HTTP 接口，用于抓取网页和代理搜索请求。每个代理模块位于 `src/lib`，通过 `src/routes` 暴露成 REST API，并统一使用 `HttpError` 格式化错误响应。
+Crawlify exposes HTTP endpoints for capturing webpages and brokering search requests. Responses share a consistent envelope, support multiple output formats, and provide an optional dynamic rendering fallback for client-side applications.
 
-## 目录
-- [运行环境](#运行环境)
-- [安装与启动](#安装与启动)
-- [环境变量](#环境变量)
-- [HTTP 接口](#http-接口)
+## Table of Contents
+- [Runtime Requirements](#runtime-requirements)
+- [Installation](#installation)
+- [Environment Variables](#environment-variables)
+- [HTTP Endpoints](#http-endpoints)
   - [/api/v1/crawl](#post-apiv1crawl)
   - [/api/v1/search](#post-apiv1search)
-- [动态站点渲染策略](#动态站点渲染策略)
-- [测试](#测试)
-- [目录结构](#目录结构)
-- [新增代理的步骤](#新增代理的步骤)
+- [Dynamic Site Rendering](#dynamic-site-rendering)
+- [Testing](#testing)
+- [Project Layout](#project-layout)
+- [Adding New Agents](#adding-new-agents)
 
-## 运行环境
+## Runtime Requirements
 - Node.js ≥ 18
 - npm
-- 可执行的 `bin/html2markdown`（仓库已提供）
-- 可选：Playwright 浏览器依赖（运行时需要执行 `npx playwright install-deps && npx playwright install chromium` 安装浏览器）
+- Repository-provided `bin/html2markdown` converter
+- Optional: run `npx playwright install-deps && npx playwright install chromium` to provision the bundled headless browser dependencies
 
-## 安装与启动
+## Installation
 ```bash
 npm install
 
-# 启动开发环境（监听文件变更）
+# Start the development server with file watching
 npm run dev
 
-# 生产模式启动
+# Start in production mode
 npm start
 ```
 
-首个启动前请在根目录创建 `.env` 文件（参见下文的环境变量章节）。
+Before the first launch, create a `.env` file at the repository root (see the Environment Variables section).
 
-## 环境变量
-| 变量名 | 说明 | 必填 | 用途 |
-| ------ | ---- | ---- | ---- |
-| `OPENROUTER_API_KEY` | OpenRouter Chat Completions API 密钥 | 否（只在需要摘要时必填） | 为 `summary` 格式生成摘要 |
-| `FIRECRAWL_API_KEY` | Firecrawl v2 API 密钥 | 是（使用 search 接口时） | 访问 Firecrawl 搜索服务 |
+## Environment Variables
+| Name | Description | Required | Purpose |
+| ---- | ----------- | -------- | ------- |
+| `OPENROUTER_API_KEY` | OpenRouter Chat Completions API key | No (only when summary output is requested) | Generates the `summary` format |
+| `FIRECRAWL_API_KEY` | Firecrawl v2 API key | Yes (required by the search endpoint) | Accesses the upstream search service |
+| `CRAWL_HTTP_PROXY` | Shared HTTP/HTTPS proxy for crawling and rendering fallback, e.g., `http://user:pass@proxy.local:3128` | No | Reuses a single proxy when direct access is unavailable |
 
-`.env` 示例：
+Example `.env`:
 ```env
 OPENROUTER_API_KEY=sk-...
 FIRECRAWL_API_KEY=fc-...
+CRAWL_HTTP_PROXY=http://proxy.local:3128
 ```
 
-## HTTP 接口
+## HTTP Endpoints
 
 ### `POST /api/v1/crawl`
-- **请求体**
+- **Request body**
   ```json
   {
     "url": "https://example.com",
     "formats": ["html", "markdown", "summary", "links"]
   }
   ```
-  - `url`：必填，目标页面 URL。
-  - `formats`：可选，去重后仅接受 `html`、`markdown`、`summary`、`links`，默认 `['html']`。
-- **响应示例**
+  - `url`: required, target page URL.
+  - `formats`: optional, de-duplicated array supporting `html`, `markdown`, `summary`, and `links`; defaults to `['html']` when omitted.
+- **Sample response**
   ```json
   {
     "id": "crawl_...",
@@ -86,19 +88,19 @@ FIRECRAWL_API_KEY=fc-...
     }
   }
   ```
-- **错误处理**
-  - 无法抓取源站：抛出 `HttpError`，状态码为上游响应码或 502。
-  - 各格式转换失败：不会终止请求，而是将该格式替换为 `{ status: 'error', message: '...' }`。
+- **Error handling**
+  - When the upstream site cannot be fetched, the service returns a normalized error payload whose status mirrors the upstream status code or falls back to 502.
+  - Failures affecting individual formats replace that format with `{ "status": "error", "message": "..." }` without aborting the entire request.
 
 ### `POST /api/v1/search`
-- **请求体**
+- **Request body**
   ```json
   {
     "query": "open source crawling",
     "limit": 5
   }
   ```
-- **响应示例**
+- **Sample response**
   ```json
   {
     "query": "open source crawling",
@@ -120,44 +122,44 @@ FIRECRAWL_API_KEY=fc-...
   }
   ```
 
-## 动态站点渲染策略
-- 初次抓取使用 `axios` 获取 HTML。
-- 对于文本极少或包含典型 SPA 容器（例如 `id="root"`、`id="__next"`、`data-reactroot` 等）的页面，会触发 Playwright 渲染：
-  1. 启动 headless Chromium；
-  2. 以 `CrawlifyBot/1.0` User-Agent 打开页面，优先等待 `networkidle`；
-  3. 回收渲染后的完整 HTML 替换原内容，再继续生成 Markdown、摘要、链接等格式；
-  4. Playwright 出错时自动降级使用原始 HTML。
-- 为避免运行时报错，请提前执行：
+## Dynamic Site Rendering
+- The initial crawl uses a lightweight HTTP client to download raw HTML.
+- Pages with sparse readable text or recognizable single-page application containers (for example `id="root"`, `id="__next"`, `data-reactroot`) trigger the headless rendering fallback:
+  1. Launch a bundled headless browser and open the page with the `CrawlifyBot/1.0` user agent, waiting for network activity to settle.
+  2. Replace the original HTML with the rendered markup and continue generating Markdown, summaries, and links.
+  3. On rendering failures, gracefully fall back to the initial HTML response.
+- When `CRAWL_HTTP_PROXY` is defined, both the initial request and the rendering fallback reuse the same proxy configuration.
+- To avoid runtime errors, provision the bundled browser assets ahead of time:
   ```bash
   npx playwright install
   ```
 
-## 测试
+## Testing
 ```bash
 npm test
 ```
-测试使用 Node.js 原生测试运行器对 `crawlUrl` 与 `searchWeb` 的成功和失败场景进行断言，axios 与外部 API 均通过 stub 模拟。
+The tests use Node.js' built-in test runner to cover both successful and failure scenarios for `crawlUrl` and `searchWeb`, stubbing external interactions.
 
-## 目录结构
+## Project Layout
 ```
 src/
   lib/
-    crawlService.js     # 抓取逻辑与 Playwright 回退
-    searchService.js    # Firecrawl 搜索代理
+    crawlService.js     # Crawl logic and browser-based fallback rendering
+    searchService.js    # Search proxy logic
   routes/
-    crawl.js            # /api/v1/crawl 路由校验与转发
-    search.js           # /api/v1/search 路由校验与转发
+    crawl.js            # /api/v1/crawl validation and delegation
+    search.js           # /api/v1/search validation and delegation
   utils/
-    httpError.js        # 标准化错误响应
-    validation.js       # 422 验证工具
+    httpError.js        # Normalized error response helper
+    validation.js       # 422 validation utilities
 bin/
-  html2markdown         # Markdown 转换二进制
+  html2markdown         # Markdown conversion binary
 tests/
-  api.test.js           # crawl/search 集成式单测
+  api.test.js           # Crawl/search integration-style tests
 ```
 
-## 新增代理的步骤
-1. 在 `src/lib` 新建代理模块，实现业务逻辑并透出 `HttpError`。
-2. 在 `src/routes` 中添加对应路由，负责请求体验证与参数整理。
-3. 在 README/文档中记录所需环境变量与依赖。
-4. 在 `tests/` 编写集成取向的单测，Mock 外部服务以覆盖成功与错误场景。
+## Adding New Agents
+1. Create a new module in `src/lib` with the agent logic and adopt the shared error response shape.
+2. Add the companion route under `src/routes` to validate payloads and forward requests to the agent.
+3. Document any new environment variables and dependencies.
+4. Write integration-oriented tests in `tests/`, mocking external services to cover both success and failure flows.
