@@ -1,10 +1,20 @@
 const express = require('express');
+const path = require('node:path');
 const routes = require('./routes');
 
 function createApp() {
   const app = express();
 
   app.use(express.json({ limit: '1mb' }));
+
+  const publicRoot = path.resolve(__dirname, '../public');
+  const screenshotsDir = path.join(publicRoot, 'screenshots');
+
+  app.use('/screenshots', express.static(screenshotsDir, {
+    fallthrough: true,
+    maxAge: '1d',
+    index: false,
+  }));
 
   app.use('/api/v1', routes);
 

@@ -2,6 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
+const fsPromises = require('node:fs/promises');
 const path = require('node:path');
 const { v4: uuidv4 } = require('uuid');
 const { loadEnv } = require('../config/loadEnv');
@@ -10,11 +11,14 @@ const HttpError = require('../utils/httpError');
 loadEnv();
 
 const USER_AGENT = 'CrawlifyBot/1.0';
-const SUPPORTED_FORMATS = new Set(['html', 'markdown', 'summary', 'links']);
+const SUPPORTED_FORMATS = new Set(['html', 'markdown', 'summary', 'links', 'screenshot']);
 const MARKDOWN_ERROR_MESSAGE = 'Failed to convert HTML to Markdown.';
 const SUMMARY_RATE_LIMIT_MESSAGE = 'Summary is temporarily rate limited. Please try again soon.';
 
 const HTML2MARKDOWN_PATH = path.resolve(__dirname, '../../bin/html2markdown');
+const SCREENSHOT_ROUTE_PREFIX = '/screenshots';
+const SCREENSHOT_DIRECTORY = path.resolve(__dirname, '../../public/screenshots');
+const SCREENSHOT_CONTENT_TYPE = 'image/png';
 
 async function crawlUrl({ url, formats }) {
   if (!Array.isArray(formats) || formats.length === 0) {
@@ -79,6 +83,7 @@ async function crawlUrl({ url, formats }) {
   const wantsMarkdown = normalizedFormats.includes('markdown');
   const wantsSummary = normalizedFormats.includes('summary');
   const wantsLinks = normalizedFormats.includes('links');
+  const wantsScreenshot = normalizedFormats.includes('screenshot');
 
   if (wantsHtml) {
     formatsPayload.html = {
@@ -126,6 +131,22 @@ async function crawlUrl({ url, formats }) {
       items: links,
       count: links.length,
     };
+  }
+
+  if (wantsScreenshot) {
+    try {
+      const screenshotResult = await captureScreenshot({
+        url,
+        proxyOptions: proxySettings?.playwright,
+      });
+
+      formatsPayload.screenshot = screenshotResult;
+    } catch (error) {
+      formatsPayload.screenshot = {
+        status: 'error',
+        message: 'Failed to capture screenshot.',
+      };
+    }
   }
 
   return {
@@ -487,23 +508,7 @@ async function renderPageWithPlaywright(url, proxyOptions) {
     });
     page = await context.newPage();
 
-    let response;
-
-    try {
-      response = await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: 20_000,
-      });
-    } catch (error) {
-      if (error?.name === 'TimeoutError') {
-        response = await page.goto(url, {
-          waitUntil: 'domcontentloaded',
-          timeout: 10_000,
-        });
-      } else {
-        throw error;
-      }
-    }
+    const response = await navigateWithRetry(page, url);
 
     const html = await page.content();
     let contentType = null;
@@ -547,6 +552,127 @@ async function renderPageWithPlaywright(url, proxyOptions) {
       } catch (error) {
         // Swallow cleanup errors.
       }
+    }
+  }
+}
+
+async function captureScreenshot({ url, proxyOptions }) {
+  let chromium;
+
+  try {
+    ({ chromium } = require('playwright'));
+  } catch (error) {
+    throw new Error('Playwright is not available.');
+  }
+
+  if (!chromium || typeof chromium.launch !== 'function') {
+    throw new Error('Playwright chromium launcher is unavailable.');
+  }
+
+  await ensureScreenshotDirectory();
+
+  const fileId = `screenshot_${uuidv4()}`;
+  const fileName = `${fileId}.png`;
+  const filePath = path.join(SCREENSHOT_DIRECTORY, fileName);
+
+  let browser;
+  let context;
+  let page;
+
+  try {
+    const launchOptions = { headless: true };
+
+    if (proxyOptions) {
+      launchOptions.proxy = proxyOptions;
+    }
+
+    browser = await chromium.launch(launchOptions);
+    context = await browser.newContext({
+      userAgent: USER_AGENT,
+    });
+    page = await context.newPage();
+
+    await navigateWithRetry(page, url);
+
+    await page.screenshot({
+      path: filePath,
+      type: 'png',
+      fullPage: true,
+    });
+
+    return {
+      url: `${SCREENSHOT_ROUTE_PREFIX}/${fileName}`,
+      content_type: SCREENSHOT_CONTENT_TYPE,
+      captured_at: new Date().toISOString(),
+    };
+  } catch (error) {
+    await safeRemove(filePath);
+    throw error;
+  } finally {
+    if (page) {
+      try {
+        await page.close();
+      } catch (cleanupError) {
+        // Swallow cleanup errors.
+      }
+    }
+
+    if (context) {
+      try {
+        await context.close();
+      } catch (cleanupError) {
+        // Swallow cleanup errors.
+      }
+    }
+
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (cleanupError) {
+        // Swallow cleanup errors.
+      }
+    }
+  }
+}
+
+async function navigateWithRetry(page, url) {
+  try {
+    return await page.goto(url, {
+      waitUntil: 'networkidle',
+      timeout: 20_000,
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError') {
+      return page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 10_000,
+      });
+    }
+
+    throw error;
+  }
+}
+
+async function ensureScreenshotDirectory() {
+  try {
+    await fsPromises.mkdir(SCREENSHOT_DIRECTORY, { recursive: true });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') {
+      throw error;
+    }
+  }
+}
+
+async function safeRemove(filePath) {
+  if (!filePath) {
+    return;
+  }
+
+  try {
+    await fsPromises.unlink(filePath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      // Ignore cleanup issues if the file was already removed or locked.
     }
   }
 }

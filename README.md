@@ -10,6 +10,7 @@ Crawlify exposes HTTP endpoints for capturing webpages and brokering search requ
   - [/api/v1/crawl](#post-apiv1crawl)
   - [/api/v1/search](#post-apiv1search)
 - [Dynamic Site Rendering](#dynamic-site-rendering)
+- [Screenshot Lifecycle](#screenshot-lifecycle)
 - [Testing](#testing)
 - [Project Layout](#project-layout)
 - [Adding New Agents](#adding-new-agents)
@@ -74,7 +75,7 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
   }
   ```
   - `url`: required, target page URL.
-  - `formats`: optional, de-duplicated array supporting `html`, `markdown`, `summary`, and `links`; defaults to `['html']` when omitted.
+  - `formats`: optional, de-duplicated array supporting `html`, `markdown`, `summary`, `links`, and `screenshot`; defaults to `['html']` when omitted.
 - **Sample response**
   ```json
   {
@@ -100,6 +101,11 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
         "items": [
           { "url": "https://example.com/about", "text": "About" }
         ]
+      },
+      "screenshot": {
+        "url": "/screenshots/crawl_1234.png",
+        "content_type": "image/png",
+        "captured_at": "2024-06-01T12:00:00.000Z"
       }
     }
   }
@@ -107,6 +113,7 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
 - **Error handling**
   - When the upstream site cannot be fetched, the service returns a normalized error payload whose status mirrors the upstream status code or falls back to 502.
   - Failures affecting individual formats replace that format with `{ "status": "error", "message": "..." }` without aborting the entire request.
+  - When the `screenshot` format is requested, the service captures a full-page PNG using Playwright, saves it under `public/screenshots`, and returns a relative URL that is immediately accessible via `GET /screenshots/<filename>.png`.
 
 ### `POST /api/v1/search`
 - **Request body**
@@ -149,6 +156,11 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
   ```bash
   npx playwright install
   ```
+
+## Screenshot Lifecycle
+- Screenshots are written to `public/screenshots` and exposed through `/screenshots/*`.
+- A background task runs hourly to delete images older than six hours, keeping disk usage predictable.
+- Customize the retention interval by adjusting `initializeScreenshotCleanup` in `src/utils/screenshotCleanup.js` if your deployment needs different limits.
 
 ## Testing
 ```bash

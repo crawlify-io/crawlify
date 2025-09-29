@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const fsPromises = require('node:fs/promises');
+const path = require('node:path');
 const axios = require('axios');
 const { crawlUrl } = require('../src/lib/crawlService');
 const { searchWeb } = require('../src/lib/searchService');
@@ -45,6 +48,84 @@ test('crawlUrl returns requested formats when fetch succeeds', async () => {
     } else {
       delete process.env.OPENROUTER_API_KEY;
     }
+  }
+});
+
+test('crawlUrl supports screenshot format output', async () => {
+  const originalGet = axios.get;
+  const playwrightModuleId = require.resolve('playwright');
+  const originalPlaywrightModule = require.cache[playwrightModuleId];
+  const createdFiles = [];
+
+  axios.get = async () => ({
+    status: 200,
+    data: '<html><body><h1>Screenshot Page</h1></body></html>',
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+    },
+  });
+
+  require.cache[playwrightModuleId] = {
+    id: playwrightModuleId,
+    filename: playwrightModuleId,
+    loaded: true,
+    exports: {
+      chromium: {
+        launch: async () => ({
+          newContext: async () => ({
+            newPage: async () => ({
+              goto: async () => ({
+                headerValue: async () => 'text/html; charset=utf-8',
+                headers: async () => ({ 'content-type': 'text/html; charset=utf-8' }),
+              }),
+              screenshot: async ({ path: filePath }) => {
+                createdFiles.push(filePath);
+                await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+                await fsPromises.writeFile(filePath, 'mock image content');
+              },
+              close: async () => {},
+            }),
+            close: async () => {},
+          }),
+          close: async () => {},
+        }),
+      },
+    },
+  };
+
+  try {
+    const result = await crawlUrl({
+      url: 'https://screenshot.example',
+      formats: ['screenshot'],
+    });
+
+    assert.ok(result.formats.screenshot);
+    assert.strictEqual(result.formats.screenshot.content_type, 'image/png');
+    assert.ok(result.formats.screenshot.url.startsWith('/screenshots/'));
+
+    const fileName = path.basename(result.formats.screenshot.url);
+    const outputPath = path.resolve(__dirname, '..', 'public', 'screenshots', fileName);
+    assert.ok(fs.existsSync(outputPath));
+  } finally {
+    axios.get = originalGet;
+
+    if (originalPlaywrightModule) {
+      require.cache[playwrightModuleId] = originalPlaywrightModule;
+    } else {
+      delete require.cache[playwrightModuleId];
+    }
+
+    await Promise.all(
+      createdFiles.map(async (filePath) => {
+        try {
+          await fsPromises.unlink(filePath);
+        } catch (error) {
+          if (error?.code !== 'ENOENT') {
+            throw error;
+          }
+        }
+      }),
+    );
   }
 });
 
@@ -119,7 +200,7 @@ test('crawlUrl falls back to Playwright rendering for SPA shells', async () => {
   }
 });
 
-test('crawlUrl 使用 HTTP 代理配置', async () => {
+test('crawlUrl uses HTTP proxy configuration', async () => {
   const originalGet = axios.get;
   const originalProxy = process.env.CRAWL_HTTP_PROXY;
   process.env.CRAWL_HTTP_PROXY = 'http://user:pass@proxy.test:3128';
