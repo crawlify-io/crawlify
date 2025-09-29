@@ -1,6 +1,8 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const TurndownService = require('turndown');
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { v4: uuidv4 } = require('uuid');
 const HttpError = require('../utils/httpError');
 
@@ -9,12 +11,7 @@ const SUPPORTED_FORMATS = new Set(['html', 'markdown', 'summary', 'links']);
 const MARKDOWN_ERROR_MESSAGE = 'Failed to convert HTML to Markdown.';
 const SUMMARY_RATE_LIMIT_MESSAGE = 'Summary is temporarily rate limited. Please try again soon.';
 
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-});
-
-turndown.keep(['pre']);
+const HTML2MARKDOWN_PATH = path.resolve(__dirname, '../../bin/html2markdown');
 
 async function crawlUrl({ url, formats }) {
   if (!Array.isArray(formats) || formats.length === 0) {
@@ -71,7 +68,7 @@ async function crawlUrl({ url, formats }) {
 
   if (wantsMarkdown || wantsSummary) {
     try {
-      markdownContent = turndown.turndown(htmlContent).replace(/[\r\n]+$/, '');
+      markdownContent = await convertHtmlToMarkdown(htmlContent);
     } catch (error) {
       markdownFailed = true;
     }
@@ -211,6 +208,78 @@ async function buildSummary(url, content) {
       status: 'error',
       message: 'Failed to generate summary.',
     };
+  }
+}
+
+async function convertHtmlToMarkdown(html) {
+  const binaryPath = HTML2MARKDOWN_PATH;
+
+  if (!isExecutable(binaryPath)) {
+    throw new Error('html2markdown binary missing or not executable');
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(binaryPath, [], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    let settled = false;
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 10_000);
+
+    child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
+    child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
+
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+
+      if (timedOut) {
+        reject(new Error('html2markdown conversion timed out'));
+        return;
+      }
+
+      if (code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+        reject(new Error(stderr || MARKDOWN_ERROR_MESSAGE));
+        return;
+      }
+
+      const output = Buffer.concat(stdoutChunks).toString('utf8').replace(/[\r\n]+$/, '');
+      resolve(output);
+    });
+
+    child.stdin.on('error', () => {
+      // Swallow errors resulting from the process terminating early.
+    });
+
+    child.stdin.end(html);
+  });
+}
+
+function isExecutable(filePath) {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch (error) {
+    return false;
   }
 }
 
