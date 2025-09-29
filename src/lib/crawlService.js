@@ -26,16 +26,23 @@ async function crawlUrl({ url, formats }) {
   );
 
   let response;
+  const proxySettings = resolveCrawlerProxy();
 
   try {
-    response = await axios.get(url, {
+    const requestConfig = {
       timeout: 20_000,
       headers: {
         'User-Agent': USER_AGENT,
       },
       responseType: 'text',
       validateStatus: () => true,
-    });
+    };
+
+    if (proxySettings?.axios) {
+      requestConfig.proxy = proxySettings.axios;
+    }
+
+    response = await axios.get(url, requestConfig);
   } catch (error) {
     throw new HttpError(502, {
       status: 'error',
@@ -56,7 +63,7 @@ async function crawlUrl({ url, formats }) {
 
   if (shouldRenderWithPlaywright({ html: htmlContent, plainText: initialPlainText, contentType })) {
     try {
-      const rendered = await renderPageWithPlaywright(url);
+      const rendered = await renderPageWithPlaywright(url, proxySettings?.playwright);
 
       if (rendered?.html) {
         htmlContent = rendered.html;
@@ -450,7 +457,7 @@ function resolveLink(href, baseUrl) {
   }
 }
 
-async function renderPageWithPlaywright(url) {
+async function renderPageWithPlaywright(url, proxyOptions) {
   let chromium;
 
   try {
@@ -468,7 +475,13 @@ async function renderPageWithPlaywright(url) {
   let page;
 
   try {
-    browser = await chromium.launch({ headless: true });
+    const launchOptions = { headless: true };
+
+    if (proxyOptions) {
+      launchOptions.proxy = proxyOptions;
+    }
+
+    browser = await chromium.launch(launchOptions);
     context = await browser.newContext({
       userAgent: USER_AGENT,
     });
@@ -571,6 +584,80 @@ function shouldRenderWithPlaywright({ html, plainText, contentType }) {
   const scriptCount = (trimmedHtml.match(/<script\b/gi) || []).length;
 
   return textLength < 20 && scriptCount > 0;
+}
+
+function resolveCrawlerProxy() {
+  const raw = process.env.CRAWL_HTTP_PROXY;
+
+  if (!raw || typeof raw !== 'string') {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === '') {
+    return null;
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(trimmed);
+  } catch (error) {
+    return null;
+  }
+
+  const protocol = parsed.protocol?.toLowerCase();
+
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    return null;
+  }
+
+  const host = parsed.hostname;
+
+  if (!host) {
+    return null;
+  }
+
+  const portRaw = parsed.port;
+  let port = Number.parseInt(portRaw, 10);
+
+  if (Number.isNaN(port) || port <= 0) {
+    port = protocol === 'https:' ? 443 : 80;
+  }
+
+  const username = parsed.username ? decodeURIComponent(parsed.username) : null;
+  const password = parsed.password ? decodeURIComponent(parsed.password) : null;
+
+  const axiosProxy = {
+    protocol: protocol.slice(0, -1),
+    host,
+    port,
+  };
+
+  if (username || password) {
+    axiosProxy.auth = {
+      username: username ?? '',
+      password: password ?? '',
+    };
+  }
+
+  const playwrightProxy = {
+    server: parsed.origin,
+  };
+
+  if (username) {
+    playwrightProxy.username = username;
+  }
+
+  if (password) {
+    playwrightProxy.password = password;
+  }
+
+  return {
+    axios: axiosProxy,
+    playwright: playwrightProxy,
+  };
 }
 
 module.exports = {

@@ -53,6 +53,8 @@ test('crawlUrl falls back to Playwright rendering for SPA shells', async () => {
   const html = '<html><body><div id="root"></div><script src="/app.js"></script></body></html>';
   const playwrightModuleId = require.resolve('playwright');
   const originalPlaywrightModule = require.cache[playwrightModuleId];
+  const originalProxy = process.env.CRAWL_HTTP_PROXY;
+  process.env.CRAWL_HTTP_PROXY = 'http://proxy.internal:8080';
 
   axios.get = async () => ({
     status: 200,
@@ -68,20 +70,26 @@ test('crawlUrl falls back to Playwright rendering for SPA shells', async () => {
     loaded: true,
     exports: {
       chromium: {
-        launch: async () => ({
-          newContext: async () => ({
-            newPage: async () => ({
-              goto: async () => ({
-                headerValue: async () => 'text/html; charset=utf-8',
-                headers: async () => ({ 'content-type': 'text/html; charset=utf-8' }),
+        launch: async (options) => {
+          assert.ok(options);
+          assert.ok(options.proxy);
+          assert.strictEqual(options.proxy.server, 'http://proxy.internal:8080');
+
+          return {
+            newContext: async () => ({
+              newPage: async () => ({
+                goto: async () => ({
+                  headerValue: async () => 'text/html; charset=utf-8',
+                  headers: async () => ({ 'content-type': 'text/html; charset=utf-8' }),
+                }),
+                content: async () => '<html><body><h1>Rendered Content</h1></body></html>',
+                close: async () => {},
               }),
-              content: async () => '<html><body><h1>Rendered Content</h1></body></html>',
               close: async () => {},
             }),
             close: async () => {},
-          }),
-          close: async () => {},
-        }),
+          };
+        },
       },
     },
   };
@@ -101,6 +109,58 @@ test('crawlUrl falls back to Playwright rendering for SPA shells', async () => {
       require.cache[playwrightModuleId] = originalPlaywrightModule;
     } else {
       delete require.cache[playwrightModuleId];
+    }
+
+    if (originalProxy !== undefined) {
+      process.env.CRAWL_HTTP_PROXY = originalProxy;
+    } else {
+      delete process.env.CRAWL_HTTP_PROXY;
+    }
+  }
+});
+
+test('crawlUrl 使用 HTTP 代理配置', async () => {
+  const originalGet = axios.get;
+  const originalProxy = process.env.CRAWL_HTTP_PROXY;
+  process.env.CRAWL_HTTP_PROXY = 'http://user:pass@proxy.test:3128';
+  let capturedConfig;
+
+  axios.get = async (requestUrl, config) => {
+    capturedConfig = config;
+
+    return {
+      status: 200,
+      data: '<html><body><p>Proxy Content</p></body></html>',
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+      },
+    };
+  };
+
+  try {
+    await crawlUrl({
+      url: 'https://proxied.example',
+      formats: ['html'],
+    });
+
+    assert.ok(capturedConfig);
+    assert.ok(capturedConfig.proxy);
+    assert.deepStrictEqual(capturedConfig.proxy, {
+      protocol: 'http',
+      host: 'proxy.test',
+      port: 3128,
+      auth: {
+        username: 'user',
+        password: 'pass',
+      },
+    });
+  } finally {
+    axios.get = originalGet;
+
+    if (originalProxy !== undefined) {
+      process.env.CRAWL_HTTP_PROXY = originalProxy;
+    } else {
+      delete process.env.CRAWL_HTTP_PROXY;
     }
   }
 });
