@@ -33,6 +33,22 @@ npm start
 
 Before the first launch, create a `.env` file at the repository root (see the Environment Variables section).
 
+## Container Deployment
+```bash
+# Build the runtime image
+docker compose build
+
+# Start the service in the background
+docker compose up -d
+
+# Follow logs when needed
+docker compose logs -f api
+```
+
+The compose stack loads environment variables from `.env` and exposes the API on `http://localhost:3000` by default. Adjust the `PORT` value in `.env` to select a different listener port.
+
+Building via Compose produces an image tagged `crawlify`, which you can reuse in other orchestrators.
+
 ## Environment Variables
 | Name | Description | Required | Purpose |
 | ---- | ----------- | -------- | ------- |

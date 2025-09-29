@@ -1,0 +1,16 @@
+services:
+  crawlify:
+    image: crawlify
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=${PORT:-3000}
+    ports:
+      - "${PORT:-3000}:3000"
+    restart: unless-stopped
+    # Playwright uses shared memory for browser processes; increase allocation to reduce crashes.
+    shm_size: 1g
