@@ -43,10 +43,10 @@ docker compose build
 docker compose up -d
 
 # Follow logs when needed
-docker compose logs -f api
+docker compose logs -f crawlify
 ```
 
-The compose stack loads environment variables from `.env` and exposes the API on `http://localhost:3000` by default. Adjust the `PORT` value in `.env` to select a different listener port.
+The compose stack reads environment variables from `.env` and exposes the API on `http://localhost:3000` by default. Set `PORT` in `.env` (for example `PORT=4000`) to update both the container listener and the published host port.
 
 Building via Compose produces an image tagged `crawlify`, which you can reuse in other orchestrators.
 
