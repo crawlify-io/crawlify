@@ -1,29 +1,16 @@
-# Crawlify API
+# Crawlify
 
-Crawlify exposes HTTP endpoints for capturing webpages and brokering search requests. Responses share a consistent envelope, support multiple output formats, and provide an optional dynamic rendering fallback for client-side applications.
-
-## Table of Contents
-- [Runtime Requirements](#runtime-requirements)
-- [Installation](#installation)
-- [Environment Variables](#environment-variables)
-- [HTTP Endpoints](#http-endpoints)
-  - [/api/v1/crawl](#post-apiv1crawl)
-  - [/api/v1/search](#post-apiv1search)
-- [Dynamic Site Rendering](#dynamic-site-rendering)
-- [Screenshot Lifecycle](#screenshot-lifecycle)
-- [Testing](#testing)
-- [Project Layout](#project-layout)
-- [Adding New Agents](#adding-new-agents)
+Crawlify is a service designed for AI Agents to fetch and search web content, providing HTTP endpoints for efficient access and retrieval of webpage information.
 
 ## Runtime Requirements
 - Node.js ≥ 18
 - npm
-- Repository-provided `bin/html2markdown` converter
-- Optional: run `npx playwright install-deps && npx playwright install chromium` to provision the bundled headless browser dependencies
 
 ## Installation
 ```bash
 npm install
+npx playwright install-deps
+npx playwright install
 
 # Start the development server with file watching
 npm run dev
@@ -51,11 +38,16 @@ The compose stack reads environment variables from `.env` and exposes the API on
 Building via Compose produces an image tagged `crawlify`, which you can reuse in other orchestrators.
 
 ## Environment Variables
-| Name | Description | Required | Purpose |
-| ---- | ----------- | -------- | ------- |
-| `OPENROUTER_API_KEY` | OpenRouter Chat Completions API key | No (only when summary output is requested) | Generates the `summary` format |
-| `FIRECRAWL_API_KEY` | Firecrawl v2 API key | Yes (required by the search endpoint) | Accesses the upstream search service |
-| `CRAWL_HTTP_PROXY` | Shared HTTP/HTTPS proxy for crawling and rendering fallback, e.g., `http://user:pass@proxy.local:3128` | No | Reuses a single proxy when direct access is unavailable |
+Environment variables:
+
+- `OPENROUTER_API_KEY`  
+  OpenRouter Chat Completions API key. Not required unless the summary output is requested. Used to generate the `summary` format.
+
+- `FIRECRAWL_API_KEY`  
+  Firecrawl v2 API key. Required for the search endpoint. Used to access the upstream search service.
+
+- `CRAWL_HTTP_PROXY`  
+  Shared HTTP/HTTPS proxy for crawling and rendering fallback, e.g., `http://user:pass@proxy.local:3128`. Not required. Reuses a single proxy when direct access is unavailable.
 
 Example `.env`:
 ```env
@@ -71,7 +63,7 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
   ```json
   {
     "url": "https://example.com",
-    "formats": ["html", "markdown", "summary", "links"]
+    "formats": ["html", "markdown"]
   }
   ```
   - `url`: required, target page URL.
@@ -154,6 +146,7 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
 - When `CRAWL_HTTP_PROXY` is defined, both the initial request and the rendering fallback reuse the same proxy configuration.
 - To avoid runtime errors, provision the bundled browser assets ahead of time:
   ```bash
+  npx playwright install-deps
   npx playwright install
   ```
 
@@ -167,27 +160,3 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
 npm test
 ```
 The tests use Node.js' built-in test runner to cover both successful and failure scenarios for `crawlUrl` and `searchWeb`, stubbing external interactions.
-
-## Project Layout
-```
-src/
-  lib/
-    crawlService.js     # Crawl logic and browser-based fallback rendering
-    searchService.js    # Search proxy logic
-  routes/
-    crawl.js            # /api/v1/crawl validation and delegation
-    search.js           # /api/v1/search validation and delegation
-  utils/
-    httpError.js        # Normalized error response helper
-    validation.js       # 422 validation utilities
-bin/
-  html2markdown         # Markdown conversion binary
-tests/
-  api.test.js           # Crawl/search integration-style tests
-```
-
-## Adding New Agents
-1. Create a new module in `src/lib` with the agent logic and adopt the shared error response shape.
-2. Add the companion route under `src/routes` to validate payloads and forward requests to the agent.
-3. Document any new environment variables and dependencies.
-4. Write integration-oriented tests in `tests/`, mocking external services to cover both success and failure flows.
