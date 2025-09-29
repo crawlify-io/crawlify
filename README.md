@@ -58,6 +58,30 @@ CRAWL_HTTP_PROXY=http://proxy.local:3128
 
 ## HTTP Endpoints
 
+### Usage Examples
+
+#### Crawl Endpoint
+```bash
+# Basic usage - fetch HTML content
+curl -X POST http://localhost:3000/api/v1/crawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["html", "markdown", "summary"]
+  }'
+```
+
+#### Search Endpoint
+```bash
+# Basic search
+curl -X POST http://localhost:3000/api/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "open source crawling",
+    "limit": 5
+  }'
+```
+
 ### `POST /api/v1/crawl`
 - **Request body**
   ```json
