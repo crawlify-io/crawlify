@@ -7,6 +7,8 @@ const HttpError = require('../src/utils/httpError');
 
 test('crawlUrl returns requested formats when fetch succeeds', async () => {
   const originalGet = axios.get;
+  const originalSummaryKey = process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   const html = '<html><body><a href="https://example.com">Example</a></body></html>';
 
   axios.get = async () => ({
@@ -37,6 +39,69 @@ test('crawlUrl returns requested formats when fetch succeeds', async () => {
     });
   } finally {
     axios.get = originalGet;
+
+    if (originalSummaryKey !== undefined) {
+      process.env.OPENROUTER_API_KEY = originalSummaryKey;
+    } else {
+      delete process.env.OPENROUTER_API_KEY;
+    }
+  }
+});
+
+test('crawlUrl falls back to Playwright rendering for SPA shells', async () => {
+  const originalGet = axios.get;
+  const html = '<html><body><div id="root"></div><script src="/app.js"></script></body></html>';
+  const playwrightModuleId = require.resolve('playwright');
+  const originalPlaywrightModule = require.cache[playwrightModuleId];
+
+  axios.get = async () => ({
+    status: 200,
+    data: html,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+    },
+  });
+
+  require.cache[playwrightModuleId] = {
+    id: playwrightModuleId,
+    filename: playwrightModuleId,
+    loaded: true,
+    exports: {
+      chromium: {
+        launch: async () => ({
+          newContext: async () => ({
+            newPage: async () => ({
+              goto: async () => ({
+                headerValue: async () => 'text/html; charset=utf-8',
+                headers: async () => ({ 'content-type': 'text/html; charset=utf-8' }),
+              }),
+              content: async () => '<html><body><h1>Rendered Content</h1></body></html>',
+              close: async () => {},
+            }),
+            close: async () => {},
+          }),
+          close: async () => {},
+        }),
+      },
+    },
+  };
+
+  try {
+    const result = await crawlUrl({
+      url: 'https://spa.example',
+      formats: ['html', 'links'],
+    });
+
+    assert.ok(result.formats.html.content.includes('Rendered Content'));
+    assert.strictEqual(result.formats.links.count, 0);
+  } finally {
+    axios.get = originalGet;
+
+    if (originalPlaywrightModule) {
+      require.cache[playwrightModuleId] = originalPlaywrightModule;
+    } else {
+      delete require.cache[playwrightModuleId];
+    }
   }
 });
 

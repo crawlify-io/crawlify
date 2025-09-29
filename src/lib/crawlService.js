@@ -50,8 +50,22 @@ async function crawlUrl({ url, formats }) {
     });
   }
 
-  const htmlContent = typeof response.data === 'string' ? response.data : '';
-  const contentType = response.headers?.['content-type'] || null;
+  let htmlContent = typeof response.data === 'string' ? response.data : '';
+  let contentType = response.headers?.['content-type'] || null;
+  const initialPlainText = extractPlainText(htmlContent);
+
+  if (shouldRenderWithPlaywright({ html: htmlContent, plainText: initialPlainText, contentType })) {
+    try {
+      const rendered = await renderPageWithPlaywright(url);
+
+      if (rendered?.html) {
+        htmlContent = rendered.html;
+        contentType = rendered.contentType || contentType || 'text/html; charset=utf-8';
+      }
+    } catch (error) {
+      // Ignore Playwright rendering failures and fall back to the original HTML response.
+    }
+  }
   const formatsPayload = {};
 
   const wantsHtml = normalizedFormats.includes('html');
@@ -434,6 +448,129 @@ function resolveLink(href, baseUrl) {
   } catch (error) {
     return null;
   }
+}
+
+async function renderPageWithPlaywright(url) {
+  let chromium;
+
+  try {
+    ({ chromium } = require('playwright'));
+  } catch (error) {
+    return null;
+  }
+
+  if (!chromium || typeof chromium.launch !== 'function') {
+    return null;
+  }
+
+  let browser;
+  let context;
+  let page;
+
+  try {
+    browser = await chromium.launch({ headless: true });
+    context = await browser.newContext({
+      userAgent: USER_AGENT,
+    });
+    page = await context.newPage();
+
+    let response;
+
+    try {
+      response = await page.goto(url, {
+        waitUntil: 'networkidle',
+        timeout: 20_000,
+      });
+    } catch (error) {
+      if (error?.name === 'TimeoutError') {
+        response = await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 10_000,
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    const html = await page.content();
+    let contentType = null;
+
+    if (response) {
+      try {
+        if (typeof response.headerValue === 'function') {
+          contentType = await response.headerValue('content-type');
+        } else if (typeof response.headers === 'function') {
+          const headers = await response.headers();
+          contentType = headers?.['content-type'] || headers?.['Content-Type'] || null;
+        }
+      } catch (error) {
+        // Ignore header extraction issues.
+      }
+    }
+
+    return { html, contentType };
+  } catch (error) {
+    return null;
+  } finally {
+    if (page) {
+      try {
+        await page.close();
+      } catch (error) {
+        // Swallow cleanup errors.
+      }
+    }
+
+    if (context) {
+      try {
+        await context.close();
+      } catch (error) {
+        // Swallow cleanup errors.
+      }
+    }
+
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (error) {
+        // Swallow cleanup errors.
+      }
+    }
+  }
+}
+
+function shouldRenderWithPlaywright({ html, plainText, contentType }) {
+  const trimmedHtml = html?.trim();
+
+  if (!trimmedHtml) {
+    return true;
+  }
+
+  if (contentType && !/html/i.test(contentType)) {
+    return false;
+  }
+
+  const textLength = plainText?.length ?? 0;
+
+  if (textLength > 120) {
+    return false;
+  }
+
+  const patterns = [
+    /id="root"/i,
+    /id="app"/i,
+    /id="__next"/i,
+    /data-reactroot/i,
+    /ng-version/i,
+    /<script[^>]+type="module"/i,
+  ];
+
+  if (patterns.some((pattern) => pattern.test(trimmedHtml))) {
+    return true;
+  }
+
+  const scriptCount = (trimmedHtml.match(/<script\b/gi) || []).length;
+
+  return textLength < 20 && scriptCount > 0;
 }
 
 module.exports = {
