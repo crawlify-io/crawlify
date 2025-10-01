@@ -4,9 +4,16 @@ const fs = require('node:fs');
 const fsPromises = require('node:fs/promises');
 const path = require('node:path');
 const axios = require('axios');
+const serpapi = require('serpapi');
 const { crawlUrl } = require('../src/lib/crawlService');
-const { searchWeb } = require('../src/lib/searchService');
 const HttpError = require('../src/utils/httpError');
+const searchServicePath = require.resolve('../src/lib/searchService');
+
+function loadSearchWeb() {
+  delete require.cache[searchServicePath];
+
+  return require('../src/lib/searchService').searchWeb;
+}
 
 test('crawlUrl returns requested formats when fetch succeeds', async () => {
   const originalGet = axios.get;
@@ -272,53 +279,68 @@ test('crawlUrl throws HttpError when upstream returns non-2xx status', async () 
 });
 
 test('searchWeb throws 503 when API key is missing', async () => {
-  const originalKey = process.env.FIRECRAWL_API_KEY;
-  delete process.env.FIRECRAWL_API_KEY;
+  const originalKey = process.env.SERPAPI_API_KEY;
+  delete process.env.SERPAPI_API_KEY;
 
-  await assert.rejects(
-    () => searchWeb({ query: 'node', limit: 5 }),
-    (error) => {
-      assert.ok(error instanceof HttpError);
-      assert.strictEqual(error.statusCode, 503);
-      assert.strictEqual(error.body.message, 'Search is unavailable because Firecrawl API key is missing.');
+  const searchWeb = loadSearchWeb();
 
-      return true;
-    },
-  );
+  try {
+    await assert.rejects(
+      () => searchWeb({ query: 'node', limit: 5 }),
+      (error) => {
+        assert.ok(error instanceof HttpError);
+        assert.strictEqual(error.statusCode, 503);
+        assert.strictEqual(error.body.message, 'Search is unavailable because SerpAPI key is missing.');
+
+        return true;
+      },
+    );
+  } finally {
+    delete require.cache[searchServicePath];
+  }
 
   if (originalKey !== undefined) {
-    process.env.FIRECRAWL_API_KEY = originalKey;
+    process.env.SERPAPI_API_KEY = originalKey;
   }
 });
 
-test('searchWeb returns normalized results when Firecrawl responds successfully', async () => {
-  const originalPost = axios.post;
-  const originalKey = process.env.FIRECRAWL_API_KEY;
-  process.env.FIRECRAWL_API_KEY = 'test-key';
+test('searchWeb returns normalized results when SerpAPI responds successfully', async () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(serpapi, 'getJson');
+  const originalKey = process.env.SERPAPI_API_KEY;
+  process.env.SERPAPI_API_KEY = 'test-key';
 
-  axios.post = async () => ({
-    status: 200,
-    data: {
-      success: true,
-      data: {
-        web: [
-          {
-            title: 'Example Page',
-            description: 'A summary',
-            url: 'https://example.com',
-            metadata: {
-              sourceURL: 'https://source.example.com',
-              statusCode: 200,
-              error: null,
+  Object.defineProperty(serpapi, 'getJson', {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: (params, onSuccess, onError) => {
+      assert.strictEqual(params.engine, 'google');
+      assert.strictEqual(params.api_key, 'test-key');
+      assert.strictEqual(params.q, 'example');
+      assert.strictEqual(params.num, 3);
+
+      process.nextTick(() => {
+        onSuccess({
+          organic_results: [
+            {
+              title: 'Example Page',
+              snippet: 'A summary',
+              link: 'https://example.com',
+              position: 1,
+              displayed_link: 'example.com',
+              source: 'Example Source',
             },
+          ],
+          search_metadata: {
+            status: 'Success',
           },
-        ],
-      },
-      warning: 'partial results',
+        });
+      });
     },
   });
 
   try {
+    const searchWeb = loadSearchWeb();
     const result = await searchWeb({ query: 'example', limit: 3 });
 
     assert.strictEqual(result.query, 'example');
@@ -329,19 +351,24 @@ test('searchWeb returns normalized results when Firecrawl responds successfully'
       description: 'A summary',
       url: 'https://example.com',
       metadata: {
-        source_url: 'https://source.example.com',
-        status_code: 200,
-        error: null,
+        position: 1,
+        displayed_url: 'example.com',
+        source: 'Example Source',
       },
     });
-    assert.strictEqual(result.warning, 'partial results');
+    assert.strictEqual(result.warning, null);
   } finally {
-    axios.post = originalPost;
+    if (originalDescriptor) {
+      Object.defineProperty(serpapi, 'getJson', originalDescriptor);
+    } else {
+      delete serpapi.getJson;
+    }
+    delete require.cache[searchServicePath];
 
     if (originalKey !== undefined) {
-      process.env.FIRECRAWL_API_KEY = originalKey;
+      process.env.SERPAPI_API_KEY = originalKey;
     } else {
-      delete process.env.FIRECRAWL_API_KEY;
+      delete process.env.SERPAPI_API_KEY;
     }
   }
 });

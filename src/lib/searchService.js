@@ -1,85 +1,75 @@
-const axios = require('axios');
+const serpapi = require('serpapi');
 const { loadEnv } = require('../config/loadEnv');
 const HttpError = require('../utils/httpError');
 
 loadEnv();
 
 async function searchWeb({ query, limit }) {
-  const apiKey = process.env.FIRECRAWL_API_KEY ?? '';
+  const apiKey = process.env.SERPAPI_API_KEY ?? '';
 
   if (apiKey.trim() === '') {
     throw new HttpError(503, {
       status: 'error',
-      message: 'Search is unavailable because Firecrawl API key is missing.',
+      message: 'Search is unavailable because SerpAPI key is missing.',
     });
   }
 
-  const payload = {
-    query,
-    limit,
-    sources: ['web'],
-  };
-
   try {
-    const response = await axios.post('https://api.firecrawl.dev/v2/search', payload, {
-      timeout: 20_000,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      validateStatus: () => true,
+    const params = {
+      engine: 'google',
+      api_key: apiKey,
+      q: query,
+      num: limit,
+    };
+
+    const body = await new Promise((resolve, reject) => {
+      serpapi.getJson(
+        params,
+        (json) => resolve(json),
+        (error) => reject(error),
+      );
     });
 
-    if (response.status < 200 || response.status >= 300) {
-      throw new HttpError(response.status || 502, {
-        status: 'error',
-        message: 'Unable to complete search request.',
-      });
+    if (!body || typeof body !== 'object') {
+      throw new Error('Search API response is invalid.');
     }
 
-    const body = response.data;
-
-    if (!body || typeof body !== 'object' || body.success !== true) {
-      throw new Error('Search API response indicates failure.');
+    if (typeof body.error === 'string' && body.error.trim() !== '') {
+      throw new Error('Search API responded with an error.');
     }
 
-    const rawItems = Array.isArray(body?.data?.web) ? body.data.web : [];
+    const rawItems = Array.isArray(body?.organic_results) ? body.organic_results.slice(0, limit) : [];
 
     const results = rawItems.map((item) => ({
       title: item?.title ?? null,
-      description: item?.description ?? null,
-      url: item?.url ?? null,
+      description: item?.snippet ?? item?.description ?? null,
+      url: item?.link ?? item?.url ?? null,
       metadata: {
-        source_url: item?.metadata?.sourceURL ?? null,
-        status_code: item?.metadata?.statusCode ?? null,
-        error: item?.metadata?.error ?? null,
+        position: item?.position ?? null,
+        displayed_url: item?.displayed_link ?? null,
+        source: item?.source ?? null,
       },
     }));
+
+    const warning = body?.search_metadata?.status && body.search_metadata.status !== 'Success'
+      ? body.search_metadata.status
+      : null;
 
     return {
       query,
       limit,
       count: results.length,
       results,
-      warning: body.warning ?? null,
+      warning,
     };
   } catch (error) {
     if (error instanceof HttpError) {
       throw error;
     }
 
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status ?? 502;
-
-      throw new HttpError(status, {
-        status: 'error',
-        message: 'Unable to complete search request.',
-      });
-    }
-
     throw new HttpError(502, {
       status: 'error',
-      message: 'Unexpected error occurred while searching.',
+      message: 'Unable to complete search request.',
     });
   }
 }

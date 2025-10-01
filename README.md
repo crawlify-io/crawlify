@@ -41,10 +41,10 @@ Building via Compose produces an image tagged `crawlify`, which you can reuse in
 Environment variables:
 
 - `OPENROUTER_API_KEY`  
-  OpenRouter Chat Completions API key. Not required unless the summary output is requested. Used to generate the `summary` format.
+  OpenRouter Chat Completions API key. Only required if you want to use the summary output format. You can obtain an API key by signing up at [https://openrouter.ai/](https://openrouter.ai/) and generating a key in your dashboard.
 
-- `FIRECRAWL_API_KEY`  
-  Firecrawl v2 API key. Required for the search endpoint. Used to access the upstream search service.
+- `SERPAPI_API_KEY`  
+  SerpAPI key. Required for the search endpoint. You can obtain an API key by registering at [https://serpapi.com/](https://serpapi.com/) and generating a key in your dashboard.
 
 - `CRAWL_HTTP_PROXY`  
   Shared HTTP/HTTPS proxy for crawling and rendering fallback, e.g., `http://user:pass@proxy.local:3128`. Not required. Reuses a single proxy when direct access is unavailable.
@@ -52,7 +52,7 @@ Environment variables:
 Example `.env`:
 ```env
 OPENROUTER_API_KEY=sk-...
-FIRECRAWL_API_KEY=fc-...
+SERPAPI_API_KEY=serp-...
 CRAWL_HTTP_PROXY=http://proxy.local:3128
 ```
 
