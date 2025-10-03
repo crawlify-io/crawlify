@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const fsPromises = require('node:fs/promises');
 const path = require('node:path');
+const { URL } = require('node:url');
 const axios = require('axios');
 const serpapi = require('serpapi');
 const { crawlUrl } = require('../src/lib/crawlService');
@@ -280,7 +281,9 @@ test('crawlUrl throws HttpError when upstream returns non-2xx status', async () 
 
 test('searchWeb throws 503 when API key is missing', async () => {
   const originalKey = process.env.SERPAPI_API_KEY;
+  const originalBackend = process.env.SEARCH_BACKEND;
   delete process.env.SERPAPI_API_KEY;
+  process.env.SEARCH_BACKEND = 'serpapi';
 
   const searchWeb = loadSearchWeb();
 
@@ -297,6 +300,11 @@ test('searchWeb throws 503 when API key is missing', async () => {
     );
   } finally {
     delete require.cache[searchServicePath];
+    if (originalBackend !== undefined) {
+      process.env.SEARCH_BACKEND = originalBackend;
+    } else {
+      delete process.env.SEARCH_BACKEND;
+    }
   }
 
   if (originalKey !== undefined) {
@@ -307,7 +315,9 @@ test('searchWeb throws 503 when API key is missing', async () => {
 test('searchWeb returns normalized results when SerpAPI responds successfully', async () => {
   const originalDescriptor = Object.getOwnPropertyDescriptor(serpapi, 'getJson');
   const originalKey = process.env.SERPAPI_API_KEY;
+  const originalBackend = process.env.SEARCH_BACKEND;
   process.env.SERPAPI_API_KEY = 'test-key';
+  process.env.SEARCH_BACKEND = 'serpapi';
 
   Object.defineProperty(serpapi, 'getJson', {
     configurable: true,
@@ -369,6 +379,126 @@ test('searchWeb returns normalized results when SerpAPI responds successfully', 
       process.env.SERPAPI_API_KEY = originalKey;
     } else {
       delete process.env.SERPAPI_API_KEY;
+    }
+
+    if (originalBackend !== undefined) {
+      process.env.SEARCH_BACKEND = originalBackend;
+    } else {
+      delete process.env.SEARCH_BACKEND;
+    }
+  }
+});
+
+test('searchWeb throws 503 when SearXNG base URL is empty', async () => {
+  const originalBackend = process.env.SEARCH_BACKEND;
+  const originalBaseUrl = process.env.SEARXNG_BASE_URL;
+
+  process.env.SEARCH_BACKEND = 'searxng';
+  process.env.SEARXNG_BASE_URL = '';
+
+  const searchWeb = loadSearchWeb();
+
+  try {
+    await assert.rejects(
+      () => searchWeb({ query: 'example', limit: 3 }),
+      (error) => {
+        assert.ok(error instanceof HttpError);
+        assert.strictEqual(error.statusCode, 503);
+        assert.strictEqual(error.body.message, 'Search is unavailable because SearXNG base URL is missing.');
+
+        return true;
+      },
+    );
+  } finally {
+    delete require.cache[searchServicePath];
+
+    if (originalBackend !== undefined) {
+      process.env.SEARCH_BACKEND = originalBackend;
+    } else {
+      delete process.env.SEARCH_BACKEND;
+    }
+
+    if (originalBaseUrl !== undefined) {
+      process.env.SEARXNG_BASE_URL = originalBaseUrl;
+    } else {
+      delete process.env.SEARXNG_BASE_URL;
+    }
+  }
+});
+
+test('searchWeb returns normalized results when SearXNG responds successfully', async () => {
+  const originalBackend = process.env.SEARCH_BACKEND;
+  const originalBaseUrl = process.env.SEARXNG_BASE_URL;
+  const originalGet = axios.get;
+
+  process.env.SEARCH_BACKEND = 'searxng';
+  process.env.SEARXNG_BASE_URL = 'http://searxng.test';
+
+  axios.get = async (url, options) => {
+    const parsedUrl = new URL(url);
+
+    assert.strictEqual(parsedUrl.hostname, 'searxng.test');
+    assert.strictEqual(parsedUrl.pathname, '/search');
+    assert.strictEqual(parsedUrl.searchParams.get('q'), 'example query');
+    assert.strictEqual(parsedUrl.searchParams.get('format'), 'json');
+    assert.strictEqual(options.timeout, 10000);
+
+    return {
+      data: {
+        results: [
+          {
+            title: 'First Result',
+            content: 'First snippet',
+            url: 'https://first.example',
+            engine: 'duckduckgo',
+            category: 'general',
+            score: 1.2,
+          },
+          {
+            title: 'Second Result',
+            content: 'Second snippet',
+            url: 'https://second.example',
+            engine: 'google',
+            category: 'general',
+            score: 1.1,
+          },
+        ],
+      },
+    };
+  };
+
+  try {
+    const searchWeb = loadSearchWeb();
+    const result = await searchWeb({ query: 'example query', limit: 1 });
+
+    assert.strictEqual(result.query, 'example query');
+    assert.strictEqual(result.limit, 1);
+    assert.strictEqual(result.count, 1);
+    assert.deepStrictEqual(result.results[0], {
+      title: 'First Result',
+      description: 'First snippet',
+      url: 'https://first.example',
+      metadata: {
+        engine: 'duckduckgo',
+        category: 'general',
+        score: 1.2,
+      },
+    });
+    assert.strictEqual(result.warning, null);
+  } finally {
+    axios.get = originalGet;
+    delete require.cache[searchServicePath];
+
+    if (originalBackend !== undefined) {
+      process.env.SEARCH_BACKEND = originalBackend;
+    } else {
+      delete process.env.SEARCH_BACKEND;
+    }
+
+    if (originalBaseUrl !== undefined) {
+      process.env.SEARXNG_BASE_URL = originalBaseUrl;
+    } else {
+      delete process.env.SEARXNG_BASE_URL;
     }
   }
 });

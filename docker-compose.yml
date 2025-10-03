@@ -9,8 +9,20 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=${PORT:-3000}
+      - SEARCH_BACKEND=${SEARCH_BACKEND:-serpapi}
+      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://searxng:8080}
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
+    depends_on:
+      - searxng
     restart: unless-stopped
     # Playwright uses shared memory for browser processes; increase allocation to reduce crashes.
     shm_size: 1g
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      - INSTANCE_NAME=Crawlify SearXNG
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro

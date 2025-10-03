@@ -33,29 +33,6 @@ docker compose up -d
 docker compose logs -f crawlify
 ```
 
-The compose stack reads environment variables from `.env` and exposes the API on `http://localhost:3000` by default. Set `PORT` in `.env` (for example `PORT=4000`) to update both the container listener and the published host port.
-
-Building via Compose produces an image tagged `crawlify`, which you can reuse in other orchestrators.
-
-## Environment Variables
-Environment variables:
-
-- `OPENROUTER_API_KEY`  
-  OpenRouter Chat Completions API key. Only required if you want to use the summary output format. You can obtain an API key by signing up at [https://openrouter.ai/](https://openrouter.ai/) and generating a key in your dashboard.
-
-- `SERPAPI_API_KEY`  
-  SerpAPI key. Required for the search endpoint. You can obtain an API key by registering at [https://serpapi.com/](https://serpapi.com/) and generating a key in your dashboard.
-
-- `CRAWL_HTTP_PROXY`  
-  Shared HTTP/HTTPS proxy for crawling and rendering fallback, e.g., `http://user:pass@proxy.local:3128`. Not required. Reuses a single proxy when direct access is unavailable.
-
-Example `.env`:
-```env
-OPENROUTER_API_KEY=sk-...
-SERPAPI_API_KEY=serp-...
-CRAWL_HTTP_PROXY=http://proxy.local:3128
-```
-
 ## HTTP Endpoints
 
 ### Usage Examples

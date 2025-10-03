@@ -22,8 +22,8 @@ router.post('/search', async (req, res) => {
       errors.limit = ['The limit field must be an integer.'];
     } else if (limit < 1) {
       errors.limit = ['The limit field must be at least 1.'];
-    } else if (limit > 10) {
-      errors.limit = ['The limit field may not be greater than 10.'];
+    } else if (limit > 100) {
+      errors.limit = ['The limit field may not be greater than 100.'];
     }
   }
 
