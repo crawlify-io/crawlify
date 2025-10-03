@@ -2,26 +2,21 @@
 
 Crawlify is a service designed for AI Agents to fetch and search web content, providing HTTP endpoints for efficient access and retrieval of webpage information.
 
-## Runtime Requirements
-- Node.js ≥ 18
-- npm
+## Container Deployment
 
-## Installation
+### Environment Setup
+Before deploying, you need to configure environment variables:
+
 ```bash
-npm install
-npx playwright install-deps
-npx playwright install
+# Copy the example environment file
+cp .env.example .env
 
-# Start the development server with file watching
-npm run dev
-
-# Start in production mode
-npm start
+# Edit the .env file and set your API keys
+# At minimum, configure OPENROUTER_API_KEY for AI summaries:
+# OPENROUTER_API_KEY=your_openrouter_key_here
 ```
 
-Before the first launch, create a `.env` file at the repository root (see the Environment Variables section).
-
-## Container Deployment
+### Deploy with Docker Compose
 ```bash
 # Build the runtime image
 docker compose build
@@ -66,11 +61,7 @@ curl -X POST http://localhost:3000/api/v1/search \
   2. Replace the original HTML with the rendered markup and continue generating Markdown, summaries, and links.
   3. On rendering failures, gracefully fall back to the initial HTML response.
 - When `CRAWL_HTTP_PROXY` is defined, both the initial request and the rendering fallback reuse the same proxy configuration.
-- To avoid runtime errors, provision the bundled browser assets ahead of time:
-  ```bash
-  npx playwright install-deps
-  npx playwright install
-  ```
+- To avoid runtime errors, the Docker image includes the bundled browser assets.
 
 ## Screenshot Lifecycle
 - Screenshots are written to `public/screenshots` and exposed through `/screenshots/*`.
@@ -78,7 +69,4 @@ curl -X POST http://localhost:3000/api/v1/search \
 - Customize the retention interval by adjusting `initializeScreenshotCleanup` in `src/utils/screenshotCleanup.js` if your deployment needs different limits.
 
 ## Testing
-```bash
-npm test
-```
 The tests use Node.js' built-in test runner to cover both successful and failure scenarios for `crawlUrl` and `searchWeb`, stubbing external interactions.

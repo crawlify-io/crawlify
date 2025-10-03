@@ -16,3 +16,4 @@ Each route focuses on input validation, consistent error handling, and logging u
 
 ## Collaboration
 - Collaboration: Communicate with developers in Chinese; use English for all project code.
+- Git commits: AI-generated commit messages should be in English.
